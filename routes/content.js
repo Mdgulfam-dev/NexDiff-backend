@@ -2,6 +2,7 @@ const express = require("express");
 const { requireRoles } = require("../middleware/auth");
 const BlogPost = require("../models/BlogPost");
 const JobPost = require("../models/JobPost");
+const Testimonial = require("../models/Testimonial");
 
 const router = express.Router();
 
@@ -83,6 +84,48 @@ router.get("/jobs", async (req, res, next) => {
   }
 });
 
+router.get("/testimonials", async (req, res, next) => {
+  try {
+    const testimonials = await Testimonial.find({ status: "approved" })
+      .sort({ createdAt: -1 })
+      .limit(9)
+      .lean();
+    res.json({ testimonials });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/testimonials", async (req, res, next) => {
+  try {
+    const missing = requiredFields(req.body, ["name", "role", "service", "feedback"]);
+    const rating = Number(req.body.rating);
+
+    if (!rating || rating < 1 || rating > 5) {
+      missing.push("rating");
+    }
+
+    if (missing.length) {
+      return res.status(400).json({ message: "Please complete all review fields.", missing });
+    }
+
+    const testimonial = await Testimonial.create({
+      name: req.body.name,
+      role: req.body.role,
+      service: req.body.service,
+      rating,
+      feedback: req.body.feedback,
+    });
+
+    return res.status(201).json({
+      message: "Review submitted. It will appear after approval.",
+      testimonial,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.get("/admin/blogs", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
     const posts = await BlogPost.find().sort({ createdAt: -1 }).lean();
@@ -145,6 +188,53 @@ router.get("/admin/jobs", requireRoles(["admin", "executive"]), async (req, res,
     res.json({ jobs });
   } catch (error) {
     next(error);
+  }
+});
+
+router.get("/admin/testimonials", requireRoles(["admin", "executive"]), async (req, res, next) => {
+  try {
+    const testimonials = await Testimonial.find().sort({ createdAt: -1 }).lean();
+    res.json({ testimonials });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch("/admin/testimonials/:id/status", requireRoles(["admin", "executive"]), async (req, res, next) => {
+  try {
+    const { status } = req.body;
+
+    if (!["pending", "approved", "rejected"].includes(status)) {
+      return res.status(400).json({ message: "Invalid testimonial status." });
+    }
+
+    const testimonial = await Testimonial.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true },
+    );
+
+    if (!testimonial) {
+      return res.status(404).json({ message: "Review not found." });
+    }
+
+    return res.json({ testimonial });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.delete("/admin/testimonials/:id", requireRoles(["admin", "executive"]), async (req, res, next) => {
+  try {
+    const testimonial = await Testimonial.findByIdAndDelete(req.params.id);
+
+    if (!testimonial) {
+      return res.status(404).json({ message: "Review not found." });
+    }
+
+    return res.json({ message: "Review deleted." });
+  } catch (error) {
+    return next(error);
   }
 });
 
