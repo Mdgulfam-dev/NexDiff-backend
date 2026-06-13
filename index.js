@@ -79,7 +79,12 @@ const devOrigins = [
   "http://127.0.0.1:5174",
   "http://127.0.0.1:5175",
 ];
-const allowedOrigins = new Set([...clientOrigins, ...devOrigins]);
+const productionOrigins = [
+  "https://nex-diff-frontend.vercel.app",
+  "https://nexdiff.in",
+  "https://www.nexdiff.in",
+];
+const allowedOrigins = new Set([...clientOrigins, ...devOrigins, ...productionOrigins]);
 const mongoUri = normalizeMongoUri(process.env.MONGODB_URI);
 
 if (!mongoUri) {
