@@ -65,4 +65,26 @@ const requireAdmin = (req, res, next) => {
   }
 };
 
-module.exports = { requireAdmin, signToken };
+const requireRoles = (roles) => (req, res, next) => {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+
+  try {
+    const payload = verifyToken(token);
+
+    if (!payload?.admin) {
+      return res.status(401).json({ message: "Admin login required." });
+    }
+
+    if (!roles.includes(payload.role)) {
+      return res.status(403).json({ message: "You do not have access to this section." });
+    }
+
+    req.admin = payload;
+    return next();
+  } catch {
+    return res.status(401).json({ message: "Admin login required." });
+  }
+};
+
+module.exports = { requireAdmin, requireRoles, signToken };

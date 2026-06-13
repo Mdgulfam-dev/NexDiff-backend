@@ -1,5 +1,5 @@
 const express = require("express");
-const { requireAdmin } = require("../middleware/auth");
+const { requireRoles } = require("../middleware/auth");
 const BlogPost = require("../models/BlogPost");
 const JobPost = require("../models/JobPost");
 
@@ -63,7 +63,7 @@ router.get("/jobs", async (req, res, next) => {
   }
 });
 
-router.get("/admin/blogs", requireAdmin, async (req, res, next) => {
+router.get("/admin/blogs", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
     const posts = await BlogPost.find().sort({ createdAt: -1 }).lean();
     res.json({ posts });
@@ -72,7 +72,7 @@ router.get("/admin/blogs", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.post("/admin/blogs", requireAdmin, async (req, res, next) => {
+router.post("/admin/blogs", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
     const missing = requiredFields(req.body, ["title", "category", "image", "desc", "content"]);
 
@@ -96,7 +96,7 @@ router.post("/admin/blogs", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.delete("/admin/blogs/:id", requireAdmin, async (req, res, next) => {
+router.delete("/admin/blogs/:id", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
     const post = await BlogPost.findByIdAndDelete(req.params.id);
 
@@ -110,7 +110,7 @@ router.delete("/admin/blogs/:id", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.get("/admin/jobs", requireAdmin, async (req, res, next) => {
+router.get("/admin/jobs", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
     const jobs = await JobPost.find().sort({ createdAt: -1 }).lean();
     res.json({ jobs });
@@ -119,7 +119,7 @@ router.get("/admin/jobs", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.post("/admin/jobs", requireAdmin, async (req, res, next) => {
+router.post("/admin/jobs", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
     const missing = requiredFields(req.body, ["title", "type", "location", "focus"]);
 
@@ -141,7 +141,7 @@ router.post("/admin/jobs", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.delete("/admin/jobs/:id", requireAdmin, async (req, res, next) => {
+router.delete("/admin/jobs/:id", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
     const job = await JobPost.findByIdAndDelete(req.params.id);
 

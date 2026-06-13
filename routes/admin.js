@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const express = require("express");
-const { requireAdmin, signToken } = require("../middleware/auth");
+const { requireRoles, signToken } = require("../middleware/auth");
 const Submission = require("../models/Submission");
 const { submissionStatuses } = require("../models/Submission");
 
@@ -15,28 +15,47 @@ const isSame = (left, right) => {
 
 router.post("/login", (req, res) => {
   const { username, password } = req.body;
-  const adminUsername = String(process.env.ADMIN_USERNAME || "admin").trim();
-  const adminPassword = String(process.env.ADMIN_PASSWORD || "admin123").trim();
   const submittedUsername = String(username || "").trim();
   const submittedPassword = String(password || "").trim();
+  const users = [
+    {
+      role: "admin",
+      username: String(process.env.ADMIN_USERNAME || "admin").trim(),
+      password: String(process.env.ADMIN_PASSWORD || "admin123").trim(),
+    },
+    {
+      role: "executive",
+      username: String(process.env.EXECUTIVE_USERNAME || "").trim(),
+      password: String(process.env.EXECUTIVE_PASSWORD || "").trim(),
+    },
+    {
+      role: "manager",
+      username: String(process.env.MANAGER_USERNAME || "").trim(),
+      password: String(process.env.MANAGER_PASSWORD || "").trim(),
+    },
+  ].filter((user) => user.username && user.password);
 
-  if (
-    !isSame(submittedUsername.toLowerCase(), adminUsername.toLowerCase()) ||
-    !isSame(submittedPassword, adminPassword)
-  ) {
+  const user = users.find(
+    (item) =>
+      isSame(submittedUsername.toLowerCase(), item.username.toLowerCase()) &&
+      isSame(submittedPassword, item.password),
+  );
+
+  if (!user) {
     return res.status(401).json({ message: "Invalid admin credentials." });
   }
 
   const token = signToken({
     admin: true,
-    username: adminUsername,
+    role: user.role,
+    username: user.username,
     exp: Date.now() + 1000 * 60 * 60 * 8,
   });
 
-  return res.json({ token, user: { username: adminUsername } });
+  return res.json({ token, user: { username: user.username, role: user.role } });
 });
 
-router.get("/submissions", requireAdmin, async (req, res, next) => {
+router.get("/submissions", requireRoles(["admin", "manager"]), async (req, res, next) => {
   try {
     const filter = req.query.type ? { type: req.query.type } : {};
     const submissions = await Submission.find(filter).sort({ createdAt: -1 }).lean();
@@ -53,7 +72,7 @@ router.get("/submissions", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.patch("/submissions/:id/status", requireAdmin, async (req, res, next) => {
+router.patch("/submissions/:id/status", requireRoles(["admin", "manager"]), async (req, res, next) => {
   try {
     const { status } = req.body;
 
