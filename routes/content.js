@@ -159,6 +159,38 @@ router.post("/admin/blogs", requireRoles(["admin", "executive"]), async (req, re
   }
 });
 
+router.patch("/admin/blogs/:id", requireRoles(["admin", "executive"]), async (req, res, next) => {
+  try {
+    const missing = requiredFields(req.body, ["title", "category", "image", "desc", "content"]);
+
+    if (missing.length) {
+      return res.status(400).json({ message: "Please complete all blog fields.", missing });
+    }
+
+    const post = await BlogPost.findByIdAndUpdate(
+      req.params.id,
+      {
+        title: req.body.title,
+        slug: await createUniqueSlug(req.body.title, req.params.id),
+        category: req.body.category,
+        image: req.body.image,
+        desc: req.body.desc,
+        content: req.body.content,
+        published: req.body.published !== false,
+      },
+      { new: true },
+    );
+
+    if (!post) {
+      return res.status(404).json({ message: "Blog post not found." });
+    }
+
+    return res.json({ post });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.delete("/admin/blogs/:id", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
     const post = await BlogPost.findByIdAndDelete(req.params.id);
@@ -256,6 +288,36 @@ router.post("/admin/jobs", requireRoles(["admin", "executive"]), async (req, res
     });
 
     return res.status(201).json({ job });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.patch("/admin/jobs/:id", requireRoles(["admin", "executive"]), async (req, res, next) => {
+  try {
+    const missing = requiredFields(req.body, ["title", "type", "location", "focus"]);
+
+    if (missing.length) {
+      return res.status(400).json({ message: "Please complete all job fields.", missing });
+    }
+
+    const job = await JobPost.findByIdAndUpdate(
+      req.params.id,
+      {
+        title: req.body.title,
+        type: req.body.type,
+        location: req.body.location,
+        focus: req.body.focus,
+        published: req.body.published !== false,
+      },
+      { new: true },
+    );
+
+    if (!job) {
+      return res.status(404).json({ message: "Job post not found." });
+    }
+
+    return res.json({ job });
   } catch (error) {
     return next(error);
   }
