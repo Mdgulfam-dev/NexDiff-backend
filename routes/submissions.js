@@ -32,6 +32,10 @@ router.post("/careers", async (req, res, next) => {
   try {
     const missing = requireFields(req.body, ["name", "phone", "role", "experience"]);
 
+    if (!req.body.resume?.dataUrl || !req.body.resume?.name) {
+      missing.push("resume");
+    }
+
     if (missing.length) {
       return res.status(400).json({ message: "Please complete all required fields.", missing });
     }
