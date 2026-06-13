@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const express = require("express");
 const { requireAdmin, signToken } = require("../middleware/auth");
 const Submission = require("../models/Submission");
+const { submissionStatuses } = require("../models/Submission");
 
 const router = express.Router();
 
@@ -56,7 +57,7 @@ router.patch("/submissions/:id/status", requireAdmin, async (req, res, next) => 
   try {
     const { status } = req.body;
 
-    if (!["new", "reviewed", "closed"].includes(status)) {
+    if (!submissionStatuses.includes(status)) {
       return res.status(400).json({ message: "Invalid status." });
     }
 

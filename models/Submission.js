@@ -1,5 +1,19 @@
 const mongoose = require("mongoose");
 
+const submissionStatuses = [
+  "new",
+  "reviewed",
+  "discussion",
+  "followup",
+  "proposal_sent",
+  "payment_pending",
+  "payment_received",
+  "in_progress",
+  "completed",
+  "closed",
+  "rejected",
+];
+
 const submissionSchema = new mongoose.Schema(
   {
     type: {
@@ -10,7 +24,7 @@ const submissionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["new", "reviewed", "closed"],
+      enum: submissionStatuses,
       default: "new",
       index: true,
     },
@@ -23,3 +37,4 @@ const submissionSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model("Submission", submissionSchema);
+module.exports.submissionStatuses = submissionStatuses;
