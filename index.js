@@ -67,9 +67,11 @@ const normalizeMongoUri = (uri) => {
 
 const app = express();
 const port = process.env.PORT || 5001;
+const normalizeOrigin = (origin) =>
+  String(origin || "").trim().replace(/\/+$/, "");
 const clientOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173")
   .split(",")
-  .map((origin) => origin.trim())
+  .map(normalizeOrigin)
   .filter(Boolean);
 const devOrigins = [
   "http://localhost:5173",
@@ -84,7 +86,15 @@ const productionOrigins = [
   "https://nexdiff.in",
   "https://www.nexdiff.in",
 ];
-const allowedOrigins = new Set([...clientOrigins, ...devOrigins, ...productionOrigins]);
+const allowedOrigins = new Set([
+  ...clientOrigins,
+  ...devOrigins.map(normalizeOrigin),
+  ...productionOrigins.map(normalizeOrigin),
+]);
+const allowedOriginPatterns = [
+  /^https:\/\/([a-z0-9-]+\.)?nexdiff\.in$/i,
+  /^https:\/\/nex-diff-frontend\.vercel\.app$/i,
+];
 const mongoUri = normalizeMongoUri(process.env.MONGODB_URI);
 
 if (!mongoUri) {
@@ -100,7 +110,13 @@ if (!/^mongodb(\+srv)?:\/\//.test(mongoUri)) {
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.has(origin)) {
+      const normalizedOrigin = normalizeOrigin(origin);
+
+      if (
+        !origin ||
+        allowedOrigins.has(normalizedOrigin) ||
+        allowedOriginPatterns.some((pattern) => pattern.test(normalizedOrigin))
+      ) {
         callback(null, true);
         return;
       }
