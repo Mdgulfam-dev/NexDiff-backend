@@ -1,0 +1,158 @@
+const express = require("express");
+const { requireAdmin } = require("../middleware/auth");
+const BlogPost = require("../models/BlogPost");
+const JobPost = require("../models/JobPost");
+
+const router = express.Router();
+
+const slugify = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const createUniqueSlug = async (title, currentId = null) => {
+  const baseSlug = slugify(title);
+  let slug = baseSlug || `post-${Date.now()}`;
+  let index = 2;
+
+  while (await BlogPost.exists({ slug, _id: { $ne: currentId } })) {
+    slug = `${baseSlug}-${index}`;
+    index += 1;
+  }
+
+  return slug;
+};
+
+const requiredFields = (body, fields) =>
+  fields.filter((field) => !String(body[field] || "").trim());
+
+router.get("/blogs", async (req, res, next) => {
+  try {
+    const posts = await BlogPost.find({ published: true }).sort({ createdAt: -1 }).lean();
+    res.json({ posts });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/blogs/:slug", async (req, res, next) => {
+  try {
+    const post = await BlogPost.findOne({
+      slug: req.params.slug,
+      published: true,
+    }).lean();
+
+    if (!post) {
+      return res.status(404).json({ message: "Blog post not found." });
+    }
+
+    return res.json({ post });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get("/jobs", async (req, res, next) => {
+  try {
+    const jobs = await JobPost.find({ published: true }).sort({ createdAt: -1 }).lean();
+    res.json({ jobs });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/admin/blogs", requireAdmin, async (req, res, next) => {
+  try {
+    const posts = await BlogPost.find().sort({ createdAt: -1 }).lean();
+    res.json({ posts });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/admin/blogs", requireAdmin, async (req, res, next) => {
+  try {
+    const missing = requiredFields(req.body, ["title", "category", "image", "desc", "content"]);
+
+    if (missing.length) {
+      return res.status(400).json({ message: "Please complete all blog fields.", missing });
+    }
+
+    const post = await BlogPost.create({
+      title: req.body.title,
+      slug: await createUniqueSlug(req.body.title),
+      category: req.body.category,
+      image: req.body.image,
+      desc: req.body.desc,
+      content: req.body.content,
+      published: req.body.published !== false,
+    });
+
+    return res.status(201).json({ post });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.delete("/admin/blogs/:id", requireAdmin, async (req, res, next) => {
+  try {
+    const post = await BlogPost.findByIdAndDelete(req.params.id);
+
+    if (!post) {
+      return res.status(404).json({ message: "Blog post not found." });
+    }
+
+    return res.json({ message: "Blog post deleted." });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get("/admin/jobs", requireAdmin, async (req, res, next) => {
+  try {
+    const jobs = await JobPost.find().sort({ createdAt: -1 }).lean();
+    res.json({ jobs });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/admin/jobs", requireAdmin, async (req, res, next) => {
+  try {
+    const missing = requiredFields(req.body, ["title", "type", "location", "focus"]);
+
+    if (missing.length) {
+      return res.status(400).json({ message: "Please complete all job fields.", missing });
+    }
+
+    const job = await JobPost.create({
+      title: req.body.title,
+      type: req.body.type,
+      location: req.body.location,
+      focus: req.body.focus,
+      published: req.body.published !== false,
+    });
+
+    return res.status(201).json({ job });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.delete("/admin/jobs/:id", requireAdmin, async (req, res, next) => {
+  try {
+    const job = await JobPost.findByIdAndDelete(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({ message: "Job post not found." });
+    }
+
+    return res.json({ message: "Job post deleted." });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+module.exports = router;
