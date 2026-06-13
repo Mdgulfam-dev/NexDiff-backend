@@ -30,7 +30,7 @@ router.post("/contact", async (req, res, next) => {
 
 router.post("/careers", async (req, res, next) => {
   try {
-    const missing = requireFields(req.body, ["name", "phone", "role", "experience"]);
+    const missing = requireFields(req.body, ["name", "phone", "jobId", "role", "experience"]);
 
     if (!req.body.resume?.dataUrl || !req.body.resume?.name) {
       missing.push("resume");

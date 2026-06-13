@@ -25,6 +25,26 @@ const createUniqueSlug = async (title, currentId = null) => {
   return slug;
 };
 
+const createUniqueJobId = async () => {
+  const year = new Date().getFullYear();
+  const prefix = `JOB-${year}-`;
+  const latestJob = await JobPost.findOne({ jobId: new RegExp(`^${prefix}`) })
+    .sort({ jobId: -1 })
+    .lean();
+  const latestNumber = latestJob?.jobId
+    ? Number(latestJob.jobId.replace(prefix, ""))
+    : 0;
+  let nextNumber = Number.isNaN(latestNumber) ? 1 : latestNumber + 1;
+  let jobId = `${prefix}${String(nextNumber).padStart(4, "0")}`;
+
+  while (await JobPost.exists({ jobId })) {
+    nextNumber += 1;
+    jobId = `${prefix}${String(nextNumber).padStart(4, "0")}`;
+  }
+
+  return jobId;
+};
+
 const requiredFields = (body, fields) =>
   fields.filter((field) => !String(body[field] || "").trim());
 
@@ -112,6 +132,15 @@ router.delete("/admin/blogs/:id", requireRoles(["admin", "executive"]), async (r
 
 router.get("/admin/jobs", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
+    const jobsWithoutIds = await JobPost.find({
+      $or: [{ jobId: { $exists: false } }, { jobId: "" }, { jobId: null }],
+    });
+
+    for (const job of jobsWithoutIds) {
+      job.jobId = await createUniqueJobId();
+      await job.save();
+    }
+
     const jobs = await JobPost.find().sort({ createdAt: -1 }).lean();
     res.json({ jobs });
   } catch (error) {
@@ -128,6 +157,7 @@ router.post("/admin/jobs", requireRoles(["admin", "executive"]), async (req, res
     }
 
     const job = await JobPost.create({
+      jobId: await createUniqueJobId(),
       title: req.body.title,
       type: req.body.type,
       location: req.body.location,
