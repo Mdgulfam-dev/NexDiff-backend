@@ -67,34 +67,6 @@ const normalizeMongoUri = (uri) => {
 
 const app = express();
 const port = process.env.PORT || 5001;
-const normalizeOrigin = (origin) =>
-  String(origin || "").trim().replace(/\/+$/, "");
-const clientOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173")
-  .split(",")
-  .map(normalizeOrigin)
-  .filter(Boolean);
-const devOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "http://localhost:5175",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:5174",
-  "http://127.0.0.1:5175",
-];
-const productionOrigins = [
-  "https://nex-diff-frontend.vercel.app",
-  "https://nexdiff.in",
-  "https://www.nexdiff.in",
-];
-const allowedOrigins = new Set([
-  ...clientOrigins,
-  ...devOrigins.map(normalizeOrigin),
-  ...productionOrigins.map(normalizeOrigin),
-]);
-const allowedOriginPatterns = [
-  /^https:\/\/([a-z0-9-]+\.)?nexdiff\.in$/i,
-  /^https:\/\/nex-diff-frontend\.vercel\.app$/i,
-];
 const mongoUri = normalizeMongoUri(process.env.MONGODB_URI);
 
 if (!mongoUri) {
@@ -110,23 +82,19 @@ if (!/^mongodb(\+srv)?:\/\//.test(mongoUri)) {
 app.use(
   cors({
     origin(origin, callback) {
-      const normalizedOrigin = normalizeOrigin(origin);
-
-      if (
-        !origin ||
-        allowedOrigins.has(normalizedOrigin) ||
-        allowedOriginPatterns.some((pattern) => pattern.test(normalizedOrigin))
-      ) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error(`CORS blocked origin: ${origin}`));
+      callback(null, true);
     },
     credentials: true,
   }),
 );
 app.use(express.json({ limit: "5mb" }));
+
+app.get("/", (req, res) => {
+  res.json({
+    status: "success",
+    message: "NexDiff Backend Running Successfully 🚀",
+  });
+});
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, service: "NexDiff API" });
