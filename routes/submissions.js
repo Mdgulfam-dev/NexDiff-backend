@@ -36,6 +36,10 @@ router.post("/careers", async (req, res, next) => {
       missing.push("resume");
     }
 
+    if (req.body.acceptedTerms !== true) {
+      missing.push("acceptedTerms");
+    }
+
     if (missing.length) {
       return res.status(400).json({ message: "Please complete all required fields.", missing });
     }
