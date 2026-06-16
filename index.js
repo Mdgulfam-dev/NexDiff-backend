@@ -9,6 +9,8 @@ const adminRoutes = require("./routes/admin");
 const contentRoutes = require("./routes/content");
 
 dns.setDefaultResultOrder("ipv4first");
+console.log("DNS IPv4 Fix Loaded");
+console.log("SMTP_FAMILY:", process.env.SMTP_FAMILY);
 
 const loadEnv = () => {
   const envPath = path.join(__dirname, ".env");
