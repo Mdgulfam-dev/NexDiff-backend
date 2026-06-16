@@ -14,6 +14,41 @@ const isEmailConfigured = () =>
 const shouldSendInternalNotifications = () =>
   String(process.env.SEND_INTERNAL_NOTIFY_EMAILS || "true").toLowerCase() !== "false";
 
+// const getTransporter = () => {
+//   if (transporter) {
+//     return transporter;
+//   }
+
+//   const auth =
+//     process.env.SMTP_USER && process.env.SMTP_PASS
+//       ? {
+//           user: process.env.SMTP_USER,
+//           pass: process.env.SMTP_PASS,
+//         }
+//       : undefined;
+
+//   // transporter = nodemailer.createTransport({
+//   //   host: process.env.SMTP_HOST,
+//   //   port: Number(process.env.SMTP_PORT),
+//   //   secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
+//   //   family: Number(process.env.SMTP_FAMILY || 4),
+//   //   auth,
+//   // });
+
+//   transporter = nodemailer.createTransport({
+//     host: process.env.SMTP_HOST,
+//     port: Number(process.env.SMTP_PORT),
+//     secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
+//     auth,
+
+//     lookup(hostname, options, callback) {
+//       return dns.lookup(hostname, { family: 4 }, callback);
+//     },
+//   });
+
+//   return transporter;
+// };
+
 const getTransporter = () => {
   if (transporter) {
     return transporter;
@@ -27,23 +62,29 @@ const getTransporter = () => {
         }
       : undefined;
 
-  // transporter = nodemailer.createTransport({
-  //   host: process.env.SMTP_HOST,
-  //   port: Number(process.env.SMTP_PORT),
-  //   secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
-  //   family: Number(process.env.SMTP_FAMILY || 4),
-  //   auth,
-  // });
-
   transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT),
-    secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
+    host: process.env.SMTP_HOST || "smtp.gmail.com",
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_SECURE || "false").toLowerCase() === "true",
+
     auth,
 
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
+
+    // Force IPv4 on Render
     lookup(hostname, options, callback) {
       return dns.lookup(hostname, { family: 4 }, callback);
     },
+  });
+
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error("SMTP VERIFY ERROR:", error);
+    } else {
+      console.log("SMTP READY");
+    }
   });
 
   return transporter;
