@@ -1,11 +1,14 @@
 const fs = require("fs");
 const path = require("path");
+const dns = require("dns");
 const cors = require("cors");
 const express = require("express");
 const mongoose = require("mongoose");
 const submissionRoutes = require("./routes/submissions");
 const adminRoutes = require("./routes/admin");
 const contentRoutes = require("./routes/content");
+
+dns.setDefaultResultOrder("ipv4first");
 
 const loadEnv = () => {
   const envPath = path.join(__dirname, ".env");
