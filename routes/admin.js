@@ -8,6 +8,7 @@ const PricingRequest = require("../models/PricingRequest");
 const Submission = require("../models/Submission");
 const { submissionStatuses } = require("../models/Submission");
 const { createPaginationMeta, getPagination } = require("../utils/pagination");
+const { sendSubmissionStatusEmail } = require("../utils/email");
 
 const router = express.Router();
 
@@ -358,30 +359,56 @@ router.patch("/submissions/:id/status", requireRoles(["admin", "manager"]), asyn
 
     let updatedType = "";
     let submission = null;
+    let previousStatus = "";
 
     for (const [type, Model] of Object.entries(submissionSources)) {
-      submission = await Model.findByIdAndUpdate(req.params.id, { status }, { new: true }).lean();
+      const document = await Model.findById(req.params.id);
 
-      if (submission) {
+      if (document) {
+        previousStatus = document.status;
+        document.status = status;
+        await document.save();
+        submission = document.toObject();
         updatedType = type;
         break;
       }
     }
 
     if (!submission) {
-      submission = await Submission.findByIdAndUpdate(
-        req.params.id,
-        { status },
-        { new: true },
-      ).lean();
-      updatedType = submission?.type || "";
+      const document = await Submission.findById(req.params.id);
+
+      if (document) {
+        previousStatus = document.status;
+        document.status = status;
+        await document.save();
+        submission = document.toObject();
+        updatedType = submission.type || "";
+      }
     }
 
     if (!submission) {
       return res.status(404).json({ message: "Submission not found." });
     }
 
-    return res.json({ submission: { ...submission, type: updatedType } });
+    const emailResult =
+      previousStatus === status
+        ? { skipped: true, reason: "status_unchanged", customerSent: false }
+        : await sendSubmissionStatusEmail({
+            type: updatedType,
+            data: submission.data,
+            status,
+          }).catch((error) => {
+            console.error("Status update email failed:", error.message);
+            return { failed: 1, customerSent: false };
+          });
+
+    return res.json({
+      message: emailResult.customerSent
+        ? "Status updated. Customer email sent."
+        : "Status updated. Customer email could not be sent.",
+      email: emailResult,
+      submission: { ...submission, type: updatedType },
+    });
   } catch (error) {
     return next(error);
   }

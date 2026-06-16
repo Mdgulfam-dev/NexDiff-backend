@@ -9,6 +9,7 @@ const submissionStatuses = [
   "payment_pending",
   "payment_received",
   "in_progress",
+  "selected",
   "completed",
   "closed",
   "rejected",
