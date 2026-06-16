@@ -17,4 +17,7 @@ const testimonialSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+testimonialSchema.index({ status: 1, createdAt: -1 });
+testimonialSchema.index({ service: 1, status: 1 });
+
 module.exports = mongoose.model("Testimonial", testimonialSchema);

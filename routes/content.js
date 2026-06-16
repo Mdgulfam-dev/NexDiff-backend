@@ -3,6 +3,7 @@ const { requireRoles } = require("../middleware/auth");
 const BlogPost = require("../models/BlogPost");
 const JobPost = require("../models/JobPost");
 const Testimonial = require("../models/Testimonial");
+const { createPaginationMeta, getPagination } = require("../utils/pagination");
 
 const router = express.Router();
 
@@ -49,10 +50,27 @@ const createUniqueJobId = async () => {
 const requiredFields = (body, fields) =>
   fields.filter((field) => !String(body[field] || "").trim());
 
+const blogListProjection = "title slug category image desc published createdAt updatedAt";
+const adminBlogProjection = "title slug category image desc content published createdAt updatedAt";
+const jobListProjection = "jobId title type location focus published createdAt updatedAt";
+
 router.get("/blogs", async (req, res, next) => {
   try {
-    const posts = await BlogPost.find({ published: true }).sort({ createdAt: -1 }).lean();
-    res.json({ posts });
+    const pagination = getPagination(req.query, { defaultLimit: 12, maxLimit: 50 });
+    const [posts, total] = await Promise.all([
+      BlogPost.find({ published: true })
+        .select(blogListProjection)
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit)
+        .lean(),
+      BlogPost.countDocuments({ published: true }),
+    ]);
+
+    res.json({
+      posts,
+      pagination: createPaginationMeta({ ...pagination, total }),
+    });
   } catch (error) {
     next(error);
   }
@@ -77,20 +95,90 @@ router.get("/blogs/:slug", async (req, res, next) => {
 
 router.get("/jobs", async (req, res, next) => {
   try {
-    const jobs = await JobPost.find({ published: true }).sort({ createdAt: -1 }).lean();
-    res.json({ jobs });
+    const pagination = getPagination(req.query, { defaultLimit: 20, maxLimit: 100 });
+    const [jobs, total] = await Promise.all([
+      JobPost.find({ published: true })
+        .select(jobListProjection)
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit)
+        .lean(),
+      JobPost.countDocuments({ published: true }),
+    ]);
+
+    res.json({
+      jobs,
+      pagination: createPaginationMeta({ ...pagination, total }),
+    });
   } catch (error) {
     next(error);
   }
 });
 
+router.get("/jobs/:jobId", async (req, res, next) => {
+  try {
+    const jobId = decodeURIComponent(req.params.jobId || "");
+    const jobConditions = [{ jobId }];
+
+    if (/^[a-f\d]{24}$/i.test(jobId)) {
+      jobConditions.push({ _id: jobId });
+    }
+
+    const job = await JobPost.findOne({
+      published: true,
+      $or: jobConditions,
+    }).lean();
+
+    if (!job) {
+      return res.status(404).json({ message: "Job opening not found." });
+    }
+
+    const relatedJobs = await JobPost.find({
+      published: true,
+      _id: { $ne: job._id },
+    })
+      .select(jobListProjection)
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .lean();
+
+    return res.json({ job, relatedJobs });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get("/admin/blogs/:id", requireRoles(["admin", "executive"]), async (req, res, next) => {
+  try {
+    const post = await BlogPost.findById(req.params.id).lean();
+
+    if (!post) {
+      return res.status(404).json({ message: "Blog post not found." });
+    }
+
+    return res.json({ post });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.get("/testimonials", async (req, res, next) => {
   try {
-    const testimonials = await Testimonial.find({ status: "approved" })
-      .sort({ createdAt: -1 })
-      .limit(9)
-      .lean();
-    res.json({ testimonials });
+    const pagination = getPagination(req.query, { defaultLimit: 9, maxLimit: 30 });
+    const [testimonials, total] = await Promise.all([
+      Testimonial.find({ status: "approved" })
+        .select("name role service rating feedback status createdAt")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit)
+        .lean(),
+      Testimonial.countDocuments({ status: "approved" }),
+    ]);
+
+    res.json({
+      testimonials,
+      pagination: createPaginationMeta({ ...pagination, total }),
+    });
   } catch (error) {
     next(error);
   }
@@ -128,8 +216,21 @@ router.post("/testimonials", async (req, res, next) => {
 
 router.get("/admin/blogs", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
-    const posts = await BlogPost.find().sort({ createdAt: -1 }).lean();
-    res.json({ posts });
+    const pagination = getPagination(req.query, { defaultLimit: 50, maxLimit: 100 });
+    const [posts, total] = await Promise.all([
+      BlogPost.find()
+        .select(adminBlogProjection)
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit)
+        .lean(),
+      BlogPost.countDocuments(),
+    ]);
+
+    res.json({
+      posts,
+      pagination: createPaginationMeta({ ...pagination, total }),
+    });
   } catch (error) {
     next(error);
   }
@@ -216,8 +317,21 @@ router.get("/admin/jobs", requireRoles(["admin", "executive"]), async (req, res,
       await job.save();
     }
 
-    const jobs = await JobPost.find().sort({ createdAt: -1 }).lean();
-    res.json({ jobs });
+    const pagination = getPagination(req.query, { defaultLimit: 50, maxLimit: 100 });
+    const [jobs, total] = await Promise.all([
+      JobPost.find()
+        .select(jobListProjection)
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit)
+        .lean(),
+      JobPost.countDocuments(),
+    ]);
+
+    res.json({
+      jobs,
+      pagination: createPaginationMeta({ ...pagination, total }),
+    });
   } catch (error) {
     next(error);
   }
@@ -225,8 +339,21 @@ router.get("/admin/jobs", requireRoles(["admin", "executive"]), async (req, res,
 
 router.get("/admin/testimonials", requireRoles(["admin", "executive"]), async (req, res, next) => {
   try {
-    const testimonials = await Testimonial.find().sort({ createdAt: -1 }).lean();
-    res.json({ testimonials });
+    const pagination = getPagination(req.query, { defaultLimit: 50, maxLimit: 100 });
+    const [testimonials, total] = await Promise.all([
+      Testimonial.find()
+        .select("name role service rating feedback status createdAt updatedAt")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit)
+        .lean(),
+      Testimonial.countDocuments(),
+    ]);
+
+    res.json({
+      testimonials,
+      pagination: createPaginationMeta({ ...pagination, total }),
+    });
   } catch (error) {
     next(error);
   }

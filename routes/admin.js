@@ -2,8 +2,12 @@ const crypto = require("crypto");
 const express = require("express");
 const { requireRoles, signToken } = require("../middleware/auth");
 const { AdminUser, adminRoles } = require("../models/AdminUser");
+const CareerApplication = require("../models/CareerApplication");
+const ContactRequest = require("../models/ContactRequest");
+const PricingRequest = require("../models/PricingRequest");
 const Submission = require("../models/Submission");
 const { submissionStatuses } = require("../models/Submission");
+const { createPaginationMeta, getPagination } = require("../utils/pagination");
 
 const router = express.Router();
 
@@ -41,6 +45,106 @@ const sanitizeUser = (user) => ({
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
+
+const submissionSources = {
+  contact: ContactRequest,
+  career: CareerApplication,
+  pricing: PricingRequest,
+};
+
+const attachType = (type) => (submission) => ({
+  ...submission,
+  type,
+});
+
+const getSubmissionCounts = async () => {
+  const [contact, career, pricing, legacyCounts] = await Promise.all([
+    ContactRequest.countDocuments(),
+    CareerApplication.countDocuments(),
+    PricingRequest.countDocuments(),
+    Submission.aggregate([{ $group: { _id: "$type", total: { $sum: 1 } } }]),
+  ]);
+
+  return legacyCounts.reduce(
+    (acc, item) => ({
+      ...acc,
+      [item._id]: (acc[item._id] || 0) + item.total,
+    }),
+    { contact, career, pricing },
+  );
+};
+
+const getTypedSubmissions = async (type, pagination) => {
+  const Model = submissionSources[type];
+  const projection = "status data createdAt updatedAt";
+  const perSourceLimit = pagination.skip + pagination.limit;
+  const [items, legacyItems, total, legacyTotal] = await Promise.all([
+    Model.find()
+      .select(projection)
+      .sort({ createdAt: -1 })
+      .limit(perSourceLimit)
+      .lean(),
+    Submission.find({ type })
+      .select("type status data createdAt updatedAt")
+      .sort({ createdAt: -1 })
+      .limit(perSourceLimit)
+      .lean(),
+    Model.countDocuments(),
+    Submission.countDocuments({ type }),
+  ]);
+  const mergedItems = [
+    ...items.map(attachType(type)),
+    ...legacyItems,
+  ]
+    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+    .slice(pagination.skip, pagination.skip + pagination.limit);
+
+  return {
+    submissions: mergedItems,
+    total: total + legacyTotal,
+  };
+};
+
+const getAllSubmissions = async (pagination) => {
+  const projection = "status data createdAt updatedAt";
+  const perSourceLimit = pagination.skip + pagination.limit;
+  const [contacts, careers, pricing, legacyItems, counts] = await Promise.all([
+    ContactRequest.find()
+      .select(projection)
+      .sort({ createdAt: -1 })
+      .limit(perSourceLimit)
+      .lean(),
+    CareerApplication.find()
+      .select(projection)
+      .sort({ createdAt: -1 })
+      .limit(perSourceLimit)
+      .lean(),
+    PricingRequest.find()
+      .select(projection)
+      .sort({ createdAt: -1 })
+      .limit(perSourceLimit)
+      .lean(),
+    Submission.find()
+      .select("type status data createdAt updatedAt")
+      .sort({ createdAt: -1 })
+      .limit(perSourceLimit)
+      .lean(),
+    getSubmissionCounts(),
+  ]);
+
+  const mergedItems = [
+    ...contacts.map(attachType("contact")),
+    ...careers.map(attachType("career")),
+    ...pricing.map(attachType("pricing")),
+    ...legacyItems,
+  ]
+    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+    .slice(pagination.skip, pagination.skip + pagination.limit);
+
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+
+  return { submissions: mergedItems, total, counts };
+};
 
 router.post("/login", async (req, res, next) => {
   const { username, password } = req.body;
@@ -217,15 +321,27 @@ router.delete("/users/:id", requireRoles(["admin"]), async (req, res, next) => {
 
 router.get("/submissions", requireRoles(["admin", "manager"]), async (req, res, next) => {
   try {
-    const filter = req.query.type ? { type: req.query.type } : {};
-    const submissions = await Submission.find(filter).sort({ createdAt: -1 }).lean();
-    const counts = await Submission.aggregate([
-      { $group: { _id: "$type", total: { $sum: 1 } } },
-    ]);
+    const requestedType = String(req.query.type || "all");
+    const pagination = getPagination(req.query, { defaultLimit: 20, maxLimit: 100 });
+
+    if (requestedType !== "all" && !submissionSources[requestedType]) {
+      return res.status(400).json({ message: "Invalid submission type." });
+    }
+
+    const result =
+      requestedType === "all"
+        ? await getAllSubmissions(pagination)
+        : await getTypedSubmissions(requestedType, pagination);
+    const counts = result.counts || (await getSubmissionCounts());
 
     return res.json({
-      submissions,
-      counts: counts.reduce((acc, item) => ({ ...acc, [item._id]: item.total }), {}),
+      submissions: result.submissions,
+      counts,
+      pagination: createPaginationMeta({
+        page: pagination.page,
+        limit: pagination.limit,
+        total: result.total,
+      }),
     });
   } catch (error) {
     return next(error);
@@ -240,17 +356,32 @@ router.patch("/submissions/:id/status", requireRoles(["admin", "manager"]), asyn
       return res.status(400).json({ message: "Invalid status." });
     }
 
-    const submission = await Submission.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true },
-    );
+    let updatedType = "";
+    let submission = null;
+
+    for (const [type, Model] of Object.entries(submissionSources)) {
+      submission = await Model.findByIdAndUpdate(req.params.id, { status }, { new: true }).lean();
+
+      if (submission) {
+        updatedType = type;
+        break;
+      }
+    }
+
+    if (!submission) {
+      submission = await Submission.findByIdAndUpdate(
+        req.params.id,
+        { status },
+        { new: true },
+      ).lean();
+      updatedType = submission?.type || "";
+    }
 
     if (!submission) {
       return res.status(404).json({ message: "Submission not found." });
     }
 
-    return res.json({ submission });
+    return res.json({ submission: { ...submission, type: updatedType } });
   } catch (error) {
     return next(error);
   }

@@ -12,4 +12,8 @@ const jobPostSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+jobPostSchema.index({ published: 1, createdAt: -1 });
+jobPostSchema.index({ jobId: 1, published: 1 });
+jobPostSchema.index({ type: 1, location: 1, createdAt: -1 });
+
 module.exports = mongoose.model("JobPost", jobPostSchema);
