@@ -1,15 +1,49 @@
 const dns = require("dns");
 const nodemailer = require("nodemailer");
+const sendgridMail = require("@sendgrid/mail");
 
 dns.setDefaultResultOrder("ipv4first");
 
 let transporter;
+let isSendGridConfigured = false;
 
 const getMailFrom = () =>
-  process.env.MAIL_FROM || process.env.SMTP_FROM || process.env.SMTP_USER;
+  process.env.MAIL_FROM ||
+  process.env.SMTP_FROM ||
+  process.env.SENDGRID_FROM ||
+  process.env.SMTP_USER;
 
-const isEmailConfigured = () =>
+const isSmtpConfigured = () =>
   Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT && getMailFrom());
+
+const isSendGridReady = () =>
+  Boolean(process.env.SENDGRID_API_KEY && getMailFrom());
+
+const isEmailConfigured = () => isSendGridReady() || isSmtpConfigured();
+
+const parseEmailAddress = (value) => {
+  const address = String(value || "").trim();
+  const match = address.match(/^(.*?)\s*<([^>]+)>$/);
+
+  if (!match) {
+    return address;
+  }
+
+  const name = match[1].trim().replace(/^["']|["']$/g, "");
+  const email = match[2].trim();
+
+  return name ? { email, name } : email;
+};
+
+const formatFrom = (name, value = getMailFrom()) => {
+  const address = String(value || "").trim();
+
+  if (!address || address.includes("<")) {
+    return address;
+  }
+
+  return `"${name}" <${address}>`;
+};
 
 const shouldSendInternalNotifications = () =>
   String(process.env.SEND_INTERNAL_NOTIFY_EMAILS || "true").toLowerCase() !== "false";
@@ -48,6 +82,111 @@ const getTransporter = () => {
 
   return transporter;
 };
+
+const configureSendGrid = () => {
+  if (isSendGridConfigured) {
+    return;
+  }
+
+  sendgridMail.setApiKey(process.env.SENDGRID_API_KEY);
+  isSendGridConfigured = true;
+};
+
+const toSendGridAttachment = (attachment) => {
+  if (!attachment?.content || !attachment?.filename) {
+    return null;
+  }
+
+  const content = Buffer.isBuffer(attachment.content)
+    ? attachment.content.toString("base64")
+    : Buffer.from(String(attachment.content)).toString("base64");
+
+  return {
+    content,
+    filename: attachment.filename,
+    type: attachment.contentType,
+    disposition: "attachment",
+  };
+};
+
+const toSendGridMessage = (mailOptions) => {
+  const message = {
+    from: parseEmailAddress(process.env.SENDGRID_FROM || mailOptions.from || getMailFrom()),
+    to: mailOptions.to,
+    subject: mailOptions.subject,
+    text: mailOptions.text,
+    html: mailOptions.html,
+  };
+
+  if (mailOptions.cc) {
+    message.cc = mailOptions.cc;
+  }
+
+  if (mailOptions.bcc) {
+    message.bcc = mailOptions.bcc;
+  }
+
+  const attachments = (mailOptions.attachments || [])
+    .map(toSendGridAttachment)
+    .filter(Boolean);
+
+  if (attachments.length) {
+    message.attachments = attachments;
+  }
+
+  return message;
+};
+
+const getSendGridMessageId = (response) =>
+  response?.[0]?.headers?.["x-message-id"] || response?.[0]?.headers?.["X-Message-Id"];
+
+const sendMail = async (mailOptions) => {
+  const to = Array.isArray(mailOptions.to) ? mailOptions.to.join(", ") : mailOptions.to;
+  const subject = mailOptions.subject || "No subject";
+
+  if (isSendGridReady()) {
+    try {
+      configureSendGrid();
+      const response = await sendgridMail.send(toSendGridMessage(mailOptions));
+      const messageId = getSendGridMessageId(response);
+
+      console.log(`SendGrid sent email to ${to}: ${subject}${messageId ? ` (${messageId})` : ""}`);
+
+      return {
+        provider: "sendgrid",
+        messageId,
+        accepted: [mailOptions.to],
+        rejected: [],
+      };
+    } catch (error) {
+      console.error(`SendGrid email failed for ${to}: ${subject}`, error.response?.body || error.message);
+
+      if (!isSmtpConfigured()) {
+        throw error;
+      }
+
+      console.log(`Trying Nodemailer fallback for ${to}: ${subject}`);
+    }
+  }
+
+  if (!isSmtpConfigured()) {
+    throw new Error("Email is not configured. Set SENDGRID_API_KEY or SMTP_HOST/SMTP_PORT with a sender.");
+  }
+
+  const info = await getTransporter().sendMail(mailOptions);
+  console.log(`Nodemailer sent email to ${to}: ${subject}${info.messageId ? ` (${info.messageId})` : ""}`);
+
+  return {
+    provider: "nodemailer",
+    messageId: info.messageId,
+    accepted: info.accepted,
+    rejected: info.rejected,
+  };
+};
+
+const getMailer = () => ({
+  sendMail,
+});
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -222,11 +361,11 @@ const getStatusMessage = (type, status, subject) => {
 
 const sendContactRequestEmails = async (request) => {
   if (!isEmailConfigured()) {
-    console.warn("Contact request email skipped: SMTP_HOST, SMTP_PORT, and MAIL_FROM/SMTP_USER are required.");
+    console.warn("Contact request email skipped: SENDGRID_API_KEY or SMTP_HOST/SMTP_PORT with MAIL_FROM/SMTP_USER is required.");
     return { skipped: true };
   }
 
-  const mailer = getTransporter();
+  const mailer = getMailer();
   const from = getMailFrom();
   const customerEmail = String(request.email || "").trim();
   const customerName = request.name || "Customer";
@@ -238,7 +377,7 @@ const sendContactRequestEmails = async (request) => {
     messages.push({
       type: "customer",
       promise: mailer.sendMail({
-        from: `"NexDiff" <${from}>`,
+        from: formatFrom("NexDiff", from),
         to: customerEmail,
         subject: `Project Brief Received: ${service} - NexDiff`,
         text: [
@@ -326,7 +465,7 @@ const sendContactRequestEmails = async (request) => {
 
 const sendSubmissionStatusEmail = async ({ type, data, status }) => {
   if (!isEmailConfigured()) {
-    console.warn("Status update email skipped: SMTP_HOST, SMTP_PORT, and MAIL_FROM/SMTP_USER are required.");
+    console.warn("Status update email skipped: SENDGRID_API_KEY or SMTP_HOST/SMTP_PORT with MAIL_FROM/SMTP_USER is required.");
     return { skipped: true };
   }
 
@@ -338,7 +477,7 @@ const sendSubmissionStatusEmail = async ({ type, data, status }) => {
     return { skipped: true, customerSent: false };
   }
 
-  const mailer = getTransporter();
+  const mailer = getMailer();
   const from = getMailFrom();
   const customerName = submissionData.name || "Customer";
   const subject = getSubmissionSubject(type, submissionData);
@@ -347,7 +486,7 @@ const sendSubmissionStatusEmail = async ({ type, data, status }) => {
   const message = getStatusMessage(type, status, subject);
 
   const info = await mailer.sendMail({
-    from: `"NexDiff" <${from}>`,
+    from: formatFrom("NexDiff", from),
     to: customerEmail,
     subject: `NexDiff Update: ${statusLabel} - ${subject}`,
     text: [
@@ -394,11 +533,11 @@ const sendSubmissionStatusEmail = async ({ type, data, status }) => {
 
 const sendCareerApplicationEmails = async (application) => {
   if (!isEmailConfigured()) {
-    console.warn("Career application email skipped: SMTP_HOST, SMTP_PORT, and MAIL_FROM/SMTP_USER are required.");
+    console.warn("Career application email skipped: SENDGRID_API_KEY or SMTP_HOST/SMTP_PORT with MAIL_FROM/SMTP_USER is required.");
     return { skipped: true };
   }
 
-  const mailer = getTransporter();
+  const mailer = getMailer();
   const from = getMailFrom();
   const applicantEmail = String(application.email || "").trim();
   const role = application.role || "job role";
@@ -411,38 +550,40 @@ const sendCareerApplicationEmails = async (application) => {
     const attachment = getResumeAttachment(application.resume);
     const rows = buildApplicationRows(application);
 
-    messages.push(
-      mailer.sendMail({
-      from,
-      to: notifyTo,
-      subject: `New job application: ${applicantName} for ${role}`,
-      text: [
-        "A new job application was submitted.",
-        "",
-        `Name: ${application.name || "Not specified"}`,
-        `Phone: ${application.phone || "Not specified"}`,
-        `Email: ${application.email || "Not specified"}`,
-        `Job ID: ${application.jobId || "Not specified"}`,
-        `Role: ${application.role || "Not specified"}`,
-        `Experience: ${application.experience || "Not specified"}`,
-        `Portfolio: ${application.portfolio || "Not specified"}`,
-        `Message: ${application.message || "Not specified"}`,
-      ].join("\n"),
-      html: `
-        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#101312;">
-          <h2 style="margin:0 0 16px;">New job application</h2>
-          <table style="border-collapse:collapse;">${rows}</table>
-        </div>
-      `,
-      attachments: attachment ? [attachment] : [],
+    messages.push({
+      type: "internal",
+      promise: mailer.sendMail({
+        from,
+        to: notifyTo,
+        subject: `New job application: ${applicantName} for ${role}`,
+        text: [
+          "A new job application was submitted.",
+          "",
+          `Name: ${application.name || "Not specified"}`,
+          `Phone: ${application.phone || "Not specified"}`,
+          `Email: ${application.email || "Not specified"}`,
+          `Job ID: ${application.jobId || "Not specified"}`,
+          `Role: ${application.role || "Not specified"}`,
+          `Experience: ${application.experience || "Not specified"}`,
+          `Portfolio: ${application.portfolio || "Not specified"}`,
+          `Message: ${application.message || "Not specified"}`,
+        ].join("\n"),
+        html: `
+          <div style="font-family:Arial,sans-serif;line-height:1.5;color:#101312;">
+            <h2 style="margin:0 0 16px;">New job application</h2>
+            <table style="border-collapse:collapse;">${rows}</table>
+          </div>
+        `,
+        attachments: attachment ? [attachment] : [],
       }),
-    );
+    });
   }
 
   if (isValidEmail(applicantEmail)) {
-    messages.push(
-      mailer.sendMail({
-        from: `"NexDiff Careers" <${from}>`,
+    messages.push({
+      type: "customer",
+      promise: mailer.sendMail({
+        from: formatFrom("NexDiff Careers", from),
         to: applicantEmail,
         subject: `Application Received: ${role} - NexDiff Careers`,
         text: [
@@ -507,11 +648,28 @@ const sendCareerApplicationEmails = async (application) => {
       </div>
     `,
       }),
-    );
+    });
   }
 
-  const results = await Promise.allSettled(messages);
+  const results = await Promise.all(
+    messages.map((message) =>
+      message.promise
+        .then((info) => ({
+          type: message.type,
+          status: "fulfilled",
+          messageId: info.messageId,
+          accepted: info.accepted,
+          rejected: info.rejected,
+        }))
+        .catch((error) => ({
+          type: message.type,
+          status: "rejected",
+          reason: error,
+        })),
+    ),
+  );
   const failed = results.filter((result) => result.status === "rejected");
+  const customerResult = results.find((result) => result.type === "customer");
 
   if (failed.length) {
     console.error("Career application email failed:", failed.map((result) => result.reason?.message || result.reason));
@@ -520,16 +678,18 @@ const sendCareerApplicationEmails = async (application) => {
   return {
     sent: results.length - failed.length,
     failed: failed.length,
+    customerSent: customerResult?.status === "fulfilled",
+    customerMessageId: customerResult?.messageId,
   };
 };
 
 const sendPlanRequestEmails = async (request) => {
   if (!isEmailConfigured()) {
-    console.warn("Plan request email skipped: SMTP_HOST, SMTP_PORT, and MAIL_FROM/SMTP_USER are required.");
+    console.warn("Plan request email skipped: SENDGRID_API_KEY or SMTP_HOST/SMTP_PORT with MAIL_FROM/SMTP_USER is required.");
     return { skipped: true };
   }
 
-  const mailer = getTransporter();
+  const mailer = getMailer();
   const from = getMailFrom();
   const customerEmail = String(request.email || "").trim();
   const planName = request.planName || "Plan Request";
@@ -593,7 +753,7 @@ const sendPlanRequestEmails = async (request) => {
       {
         type: "customer",
         promise: mailer.sendMail({
-          from: `"NexDiff" <${from}>`,
+          from: formatFrom("NexDiff", from),
           to: customerEmail,
           subject: `Plan Request Received: ${planName} - NexDiff`,
           text: [
