@@ -27,12 +27,23 @@ const getTransporter = () => {
         }
       : undefined;
 
+  // transporter = nodemailer.createTransport({
+  //   host: process.env.SMTP_HOST,
+  //   port: Number(process.env.SMTP_PORT),
+  //   secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
+  //   family: Number(process.env.SMTP_FAMILY || 4),
+  //   auth,
+  // });
+
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT),
     secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
-    family: Number(process.env.SMTP_FAMILY || 4),
     auth,
+
+    lookup(hostname, options, callback) {
+      return dns.lookup(hostname, { family: 4 }, callback);
+    },
   });
 
   return transporter;
