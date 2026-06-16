@@ -28,6 +28,7 @@ const getTransporter = () => {
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT),
     secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
+    family: Number(process.env.SMTP_FAMILY || 4),
     auth,
   });
 

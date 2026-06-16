@@ -12,6 +12,7 @@ Required SMTP variables:
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_SECURE=false
+SMTP_FAMILY=4
 SMTP_USER=your-smtp-user
 SMTP_PASS=your-smtp-password
 MAIL_FROM="NexDiff Careers <careers@nexdiff.com>"
