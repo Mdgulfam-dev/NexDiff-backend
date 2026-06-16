@@ -122,6 +122,96 @@ const buildPlanRequestRows = (request) =>
     )
     .join("");
 
+const sendContactRequestEmails = async (request) => {
+  if (!isEmailConfigured()) {
+    console.warn("Contact request email skipped: SMTP_HOST, SMTP_PORT, and MAIL_FROM/SMTP_USER are required.");
+    return { skipped: true };
+  }
+
+  const mailer = getTransporter();
+  const from = getMailFrom();
+  const customerEmail = String(request.email || "").trim();
+  const customerName = request.name || "Customer";
+  const service = request.service || "Project inquiry";
+
+  const messages = [];
+
+  if (isValidEmail(customerEmail)) {
+    messages.push({
+      type: "customer",
+      promise: mailer.sendMail({
+        from: `"NexDiff" <${from}>`,
+        to: customerEmail,
+        subject: "We received your project brief - NexDiff",
+        text: [
+          `Hello ${customerName},`,
+          "",
+          "Thank you for contacting NexDiff.",
+          `We have received your project brief for ${service}. Our team will review your requirements and contact you soon with the next steps.`,
+          "",
+          "Submission Summary:",
+          `Service: ${service}`,
+          `Budget: ${request.budget || "Not specified"}`,
+          `Urgency: ${request.urgency || "Not specified"}`,
+          "",
+          "Best regards,",
+          "Team NexDiff",
+          "https://nexdiff.com",
+        ].join("\n"),
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#333;line-height:1.6;">
+            <p>Hello ${escapeHtml(customerName)},</p>
+            <p>Thank you for contacting <strong>NexDiff</strong>.</p>
+            <p>We have received your project brief for <strong>${escapeHtml(service)}</strong>. Our team will review your requirements and contact you soon with the next steps.</p>
+            <div style="background:#f8fafc;padding:15px;border-radius:8px;margin:20px 0;">
+              <h3 style="margin-top:0;color:#101312;">Submission Summary</h3>
+              <p><strong>Service:</strong> ${escapeHtml(service)}</p>
+              <p><strong>Budget:</strong> ${escapeHtml(request.budget || "Not specified")}</p>
+              <p><strong>Urgency:</strong> ${escapeHtml(request.urgency || "Not specified")}</p>
+            </div>
+            <p>Best regards,<br><strong>Team NexDiff</strong><br><a href="https://nexdiff.com/" style="color:#2563eb;">https://nexdiff.com</a></p>
+            <hr style="border:none;border-top:1px solid #e5e7eb;margin:25px 0;">
+            <p style="font-size:12px;color:#6b7280;"><em>This is an automated confirmation email. Please do not reply directly to this message.</em></p>
+          </div>
+        `,
+      }),
+    });
+  } else {
+    console.warn("Contact request customer email skipped: invalid customer email.");
+  }
+
+  const results = await Promise.all(
+    messages.map((message) =>
+      message.promise
+        .then((info) => ({
+          type: message.type,
+          status: "fulfilled",
+          messageId: info.messageId,
+          accepted: info.accepted,
+          rejected: info.rejected,
+        }))
+        .catch((error) => ({
+          type: message.type,
+          status: "rejected",
+          reason: error,
+        })),
+    ),
+  );
+  const failed = results.filter((result) => result.status === "rejected");
+  const customerResult = results.find((result) => result.type === "customer");
+
+  if (failed.length) {
+    console.error("Contact request email failed:", failed.map((result) => result.reason?.message || result.reason));
+  }
+
+  return {
+    sent: results.length - failed.length,
+    failed: failed.length,
+    customerSent: customerResult?.status === "fulfilled",
+    customerMessageId: customerResult?.messageId,
+  };
+};
+
 const sendCareerApplicationEmails = async (application) => {
   if (!isEmailConfigured()) {
     console.warn("Career application email skipped: SMTP_HOST, SMTP_PORT, and MAIL_FROM/SMTP_USER are required.");
@@ -410,6 +500,7 @@ const sendPlanRequestEmails = async (request) => {
 };
 
 module.exports = {
+  sendContactRequestEmails,
   sendCareerApplicationEmails,
   sendPlanRequestEmails,
 };

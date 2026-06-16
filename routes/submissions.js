@@ -2,7 +2,11 @@ const express = require("express");
 const CareerApplication = require("../models/CareerApplication");
 const ContactRequest = require("../models/ContactRequest");
 const PricingRequest = require("../models/PricingRequest");
-const { sendCareerApplicationEmails, sendPlanRequestEmails } = require("../utils/email");
+const {
+  sendCareerApplicationEmails,
+  sendContactRequestEmails,
+  sendPlanRequestEmails,
+} = require("../utils/email");
 
 const router = express.Router();
 
@@ -102,6 +106,10 @@ router.post("/contact", async (req, res, next) => {
   try {
     const missing = requireFields(req.body, ["name", "email", "service"]);
 
+    if (req.body.email && !emailPattern.test(String(req.body.email).trim())) {
+      missing.push("email");
+    }
+
     if (missing.length) {
       return res.status(400).json({ message: "Please complete all required fields.", missing });
     }
@@ -110,8 +118,16 @@ router.post("/contact", async (req, res, next) => {
       data: req.body,
     });
 
+    const emailResult = await sendContactRequestEmails(req.body).catch((error) => {
+      console.error("Contact request email failed:", error.message);
+      return { failed: 1, customerSent: false };
+    });
+
     return res.status(201).json({
-      message: "Contact request saved.",
+      message: emailResult.customerSent
+        ? "Contact request saved. Confirmation email sent."
+        : "Contact request saved. Confirmation email could not be sent.",
+      email: emailResult,
       submission: { ...submission.toObject(), type: "contact" },
     });
   } catch (error) {
