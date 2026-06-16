@@ -2,6 +2,7 @@ const express = require("express");
 const CareerApplication = require("../models/CareerApplication");
 const ContactRequest = require("../models/ContactRequest");
 const PricingRequest = require("../models/PricingRequest");
+const { sendCareerApplicationEmails } = require("../utils/email");
 
 const router = express.Router();
 
@@ -122,6 +123,10 @@ router.post("/careers", async (req, res, next) => {
   try {
     const missing = requireFields(req.body, ["name", "phone", "jobId", "role", "experience"]);
 
+    if (req.body.email && !emailPattern.test(String(req.body.email).trim())) {
+      missing.push("email");
+    }
+
     if (!req.body.resume?.dataUrl || !req.body.resume?.name) {
       missing.push("resume");
     }
@@ -136,6 +141,10 @@ router.post("/careers", async (req, res, next) => {
 
     const submission = await CareerApplication.create({
       data: req.body,
+    });
+
+    sendCareerApplicationEmails(req.body).catch((error) => {
+      console.error("Career application email failed:", error.message);
     });
 
     return res.status(201).json({
