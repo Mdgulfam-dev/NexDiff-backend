@@ -2,7 +2,7 @@ const express = require("express");
 const CareerApplication = require("../models/CareerApplication");
 const ContactRequest = require("../models/ContactRequest");
 const PricingRequest = require("../models/PricingRequest");
-const { sendCareerApplicationEmails } = require("../utils/email");
+const { sendCareerApplicationEmails, sendPlanRequestEmails } = require("../utils/email");
 
 const router = express.Router();
 
@@ -168,8 +168,16 @@ router.post("/pricing-requests", async (req, res, next) => {
       data: req.body,
     });
 
+    const emailResult = await sendPlanRequestEmails(req.body).catch((error) => {
+      console.error("Plan request email failed:", error.message);
+      return { failed: 1, customerSent: false };
+    });
+
     return res.status(201).json({
-      message: "Pricing request saved.",
+      message: emailResult.customerSent
+        ? "Pricing request saved. Confirmation email sent."
+        : "Pricing request saved. Confirmation email could not be sent.",
+      email: emailResult,
       submission: { ...submission.toObject(), type: "pricing" },
     });
   } catch (error) {
